@@ -78,7 +78,7 @@ int main(int argc, char **argv)
       
       
       
-      process_directory(argv[1], fd);
+      process_directory(argv[i], fd);
       closedir(dir);
     }
     close(fd);
