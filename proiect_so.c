@@ -53,13 +53,13 @@ void process_directory(const char *dir_name, int snapshot_fd)
 }
 
 
-void compare_and_update_snapshot(const char *dir_name)
+void compare_and_update_snapshot(const char *dir_name, const char *output_dir)
 {
   char snapshot_file[PATH_MAX];
   char temp_file[PATH_MAX];
   
   int snapshot_fd;
-  snprintf(snapshot_file, PATH_MAX, "%s_snapshot.txt", dir_name);
+  snprintf(snapshot_file, PATH_MAX, "%s/%s_snapshot.txt", output_dir, basename((char *)dir_name));
   if ((snapshot_fd = open(snapshot_file, O_RDONLY)) == -1)
     {
       if (errno == ENOENT)
@@ -157,15 +157,38 @@ void compare_and_update_snapshot(const char *dir_name)
   }
   rename(temp_file, snapshot_file);
 }
+
 int main(int argc, char **argv){
-  if (argc != 2){
-    printf("Usage: %s <directory_path>\n", argv[0]);
-    return 1;
+  if(argc < 4 || argc>13){
+    printf("Usage: %s -o <output_path> max 10 * <directory_path>\n", argv[0]);
+    return 0;
   }
   
-  const char *dir_name = argv[1];
-  
-  compare_and_update_snapshot(dir_name);
-  
+  DIR* dir;
+  int fd;
+  const char *dir_name;
+  char *output_dir = NULL;
+  for(int i = 1; i < argc; i++){
+    if(strcmp(argv[i],"-o")==0 && (i+1)<argc){
+      i++;
+      output_dir = argv[i];
+      if((fd = open(output_dir, O_RDONLY)) == -1){
+	printf("Error: Cannot open output file\n");
+	return 0;
+      }
+    }
+    else{
+      if((dir = opendir(argv[i])) == NULL){
+	continue;
+      }
+      
+      dir_name = argv[i];
+      printf("DIR: %s:\n", argv[i]);
+      compare_and_update_snapshot(dir_name, output_dir);
+      closedir(dir);
+    }
+  }
+ 
+  close(fd);
   return 0;
-} 
+}
