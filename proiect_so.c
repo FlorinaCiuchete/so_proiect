@@ -57,15 +57,13 @@ void compare_and_update_snapshot(const char *dir_name)
 {
   char snapshot_file[PATH_MAX];
   char temp_file[PATH_MAX];
-  char diff_output_file[PATH_MAX];
   
   int snapshot_fd;
-  snprintf(snapshot_file, PATH_MAX, "%s/%s_snapshot.txt", dir_name, basename((char *)dir_name));
+  snprintf(snapshot_file, PATH_MAX, "%s_snapshot.txt", dir_name);
   if ((snapshot_fd = open(snapshot_file, O_RDONLY)) == -1)
     {
       if (errno == ENOENT)
         {
-	  //create_snapshot(dir_name);
 	  if ((snapshot_fd = open(snapshot_file, O_WRONLY | O_CREAT | O_TRUNC, 0644)) == -1)
 	    {
 	      printf("Error: Cannot open output file\n");
@@ -86,7 +84,7 @@ void compare_and_update_snapshot(const char *dir_name)
     }
   //daca nu a fost primul apel de creeare de snapshot, facem un fisier temporar cu care sa comparam apoi diferentele
   int temp_fd;
-  snprintf(temp_file, PATH_MAX, "%s/%s_temp.txt", dir_name, basename((char *)dir_name));
+  snprintf(temp_file, PATH_MAX, "%s_temp.txt", dir_name);
   if ((temp_fd = open(temp_file, O_RDONLY)) == -1)
     {
       if (errno == ENOENT)
@@ -100,7 +98,7 @@ void compare_and_update_snapshot(const char *dir_name)
 	  process_directory(dir_name, temp_fd);
 	  
 	  close(temp_fd);
-	  printf("Temp file for directory %s created.\n", dir_name);
+	  printf("A snapshot already exists, a temporary file for directory %s was created.\n", dir_name);
         }
       else
         {
@@ -108,76 +106,57 @@ void compare_and_update_snapshot(const char *dir_name)
 	  return;
         }
     }
-
-  
-  snprintf(diff_output_file, PATH_MAX, "%s/%s_diff.txt", dir_name, basename((char *)dir_name));
-  
+ 
   char command[2 * PATH_MAX + 50]; 
   snprintf(command, sizeof(command), "diff -uN --strip-trailing-cr %s %s > /dev/null", snapshot_file, temp_file);
   
   if (system(command) == 0) {
     printf("No changes found in %s\n", dir_name);
     remove(temp_file);
-    remove(diff_output_file);
+    return;
   }
   else{
     printf("Changes found in %s. Updating snapshot.\n", dir_name);
-  }
-  
-  FILE *diff_fp = fopen(diff_output_file, "r");
-  if (diff_fp){
-    printf("Differences:\n");
-    char diff_line[MAX_BUFFER_SIZE];
-    while (fgets(diff_line, sizeof(diff_line), diff_fp)){
-      printf("%s", diff_line);
-    }
-    fclose(diff_fp);
-  }
-  
-  FILE *snapshot_fp = fopen(snapshot_file, "r");
-  FILE *temp_fp = fopen(temp_file, "r");
-  
-  if (snapshot_fp && temp_fp)
-    {
-      printf("Renamed or deleted files:\n");
-      char snapshot_line[MAX_BUFFER_SIZE];
-      char temp_line[MAX_BUFFER_SIZE];
-      
-      while (fgets(snapshot_line, sizeof(snapshot_line), snapshot_fp) && fgets(temp_line, sizeof(temp_line), temp_fp))
-	{
-	  if (strcmp(snapshot_line, temp_line) != 0)
-	    {
+    
+    FILE *snapshot_fp = fopen(snapshot_file, "r");
+    FILE *temp_fp = fopen(temp_file, "r");
+    
+    if (snapshot_fp && temp_fp)
+      {
+	printf("Modified files:\n");
+	char snapshot_line[MAX_BUFFER_SIZE];
+	char temp_line[MAX_BUFFER_SIZE];
+	
+	while (fgets(snapshot_line, sizeof(snapshot_line), snapshot_fp) && fgets(temp_line, sizeof(temp_line), temp_fp))
+	  {
+	    if (strcmp(snapshot_line, temp_line) != 0)
+	      {
 		if (strstr(temp_line, snapshot_line) == NULL)
 		  {
-		    printf("Deleted: %s", snapshot_line);
+		    printf("Modified: %s", snapshot_line);
 		  }
-		else
-		  {
-                    printf("Renamed: %s -> %s", snapshot_line, temp_line);
-		  }
-	    }
-	}
-      while (fgets(snapshot_line, sizeof(snapshot_line), snapshot_fp))
-	{
-	  printf("Deleted: %s", snapshot_line);
-	}
-      while (fgets(temp_line, sizeof(temp_line), temp_fp))
-	{
-	  printf("Renamed: %s", temp_line);
+	      }
+	  }
+	while (fgets(snapshot_line, sizeof(snapshot_line), snapshot_fp))
+	  {
+	    printf("Deleted: %s", snapshot_line);
+	  }
+	while (fgets(temp_line, sizeof(temp_line), temp_fp))
+	  {
+	    printf("Renamed: %s", temp_line);
 	  }
       
-      fclose(snapshot_fp);
-      fclose(temp_fp);
+	fclose(snapshot_fp);
+	fclose(temp_fp);
       }
-  else
+    else
       {
 	printf("Error: Cannot open snapshot files for comparison\n");
       }
   
+  }
   rename(temp_file, snapshot_file);
 }
-
-
 int main(int argc, char **argv){
   if (argc != 2){
     printf("Usage: %s <directory_path>\n", argv[0]);
@@ -187,6 +166,6 @@ int main(int argc, char **argv){
   const char *dir_name = argv[1];
   
   compare_and_update_snapshot(dir_name);
-
+  
   return 0;
 } 
