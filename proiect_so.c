@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <libgen.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
 
 #define MAX_BUFFER_SIZE 500
 
@@ -98,7 +101,7 @@ void compare_and_update_snapshot(const char *dir_name, const char *output_dir)
 	  process_directory(dir_name, temp_fd);
 	  
 	  close(temp_fd);
-	  printf("A snapshot already exists, a temporary file for directory %s was created.\n", dir_name);
+	  printf("A snapshot already exists, a snapshot comparison temporary file for directory %s was created.\n", dir_name);
         }
       else
         {
@@ -168,6 +171,9 @@ int main(int argc, char **argv){
   int fd;
   const char *dir_name;
   char *output_dir = NULL;
+  pid_t pid;
+  int status;
+  
   for(int i = 1; i < argc; i++){
     if(strcmp(argv[i],"-o")==0 && (i+1)<argc){
       i++;
@@ -182,13 +188,27 @@ int main(int argc, char **argv){
 	continue;
       }
       
+	
       dir_name = argv[i];
       printf("DIR: %s:\n", argv[i]);
-      compare_and_update_snapshot(dir_name, output_dir);
+      pid = fork();
+      if (pid < 0) {
+	printf("Error: Failed to fork process\n");
+	return 0;
+      }
+      else if (pid == 0) {
+	compare_and_update_snapshot(dir_name, output_dir);
+	exit(0);
+      }
+      else {
+	waitpid(pid, &status, 0); 
+	printf("Process with PID %d ended with the code: %d\n", pid, WEXITSTATUS(status));
+      }
       closedir(dir);
+      
     }
   }
- 
+  
   close(fd);
   return 0;
 }
