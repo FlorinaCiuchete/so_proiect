@@ -82,10 +82,10 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
                 {
                     close(pipe_fd[1]);
                     char buffer[256];
-                    ssize_t nbytes = read(pipe_fd[0], buffer, sizeof(buffer));
-                    if (nbytes > 0)
+                    int nr_bytes = read(pipe_fd[0], buffer, sizeof(buffer));
+                    if (nr_bytes > 0)
                     {
-                        buffer[nbytes] = '\0';
+                        buffer[nr_bytes] = '\0';
                         if (strcmp(buffer, "SAFE\n") != 0)
                         {
                             printf("Procesul cu PID ul %d a găsit un fișier periculos: %s\n", pid, file_path);
@@ -127,61 +127,12 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
                     exit(EXIT_FAILURE);
                 }
 	}
-	  /* //cerinta 4
-            printf("%s has no permission\n", file_path);
-            pid_t pid = fork();
-            if (pid == -1)
-            {
-                perror("Error: Failed to fork process");
-                exit(EXIT_FAILURE);
-            }
-            else if (pid == 0)
-            {
-
-
-                execl("/bin/bash", "sh", "verify_for_malicious.sh", file_path, isolated_space_dir, (char *)NULL); // mută fișierul
-                perror("Error executing sh");                                     
-                exit(EXIT_FAILURE);
-                
-            }
-            else
-            {
-                int status;
-                pid_t result = waitpid(pid, &status, 0);
-                if (result == -1)
-                {
-                    perror("Error: Failed to wait for child process");
-                    exit(EXIT_FAILURE);
-                }
-                else if (WIFEXITED(status))
-                {
-                    int exit_status = WEXITSTATUS(status);
-                    if (exit_status == 0)
-                    {
-                        printf("Process for %s ended successfully.\n", file_path);
-                        printf("Skipping snapshot creation for %s due to being a dangerous file.\n", file_path);
-                        return;
-                    }
-                    else
-                    {
-                        printf("Process for %s failed with exit status: %d\n", file_path, exit_status);
-                    }
-                }
-                else
-                {
-                    printf("Process for %s terminated abnormally\n", dir_name);
-                }
-            }
-        }
-	  */
         char buffer[MAX_BUFFER_SIZE];
         sprintf(buffer, "name:%s, type:%d, i_node:%ld, ", d->d_name, d->d_type, d->d_ino);
         write(snapshot_fd, buffer, strlen(buffer));
 
         char time_buffer[MAX_BUFFER_SIZE];
-        strftime(time_buffer, sizeof(time_buffer), "last modified:%Y-%m-%d %H:%M:%S, ", localtime(&file_info.st_mtime));
-        write(snapshot_fd, time_buffer, strlen(time_buffer));
-        strftime(time_buffer, sizeof(time_buffer), "last accessed:%Y-%m-%d %H:%M:%S\n", localtime(&file_info.st_atime));
+        strftime(time_buffer, sizeof(time_buffer), "last modified:%Y-%m-%d %H:%M:%S\n", localtime(&file_info.st_mtime));
         write(snapshot_fd, time_buffer, strlen(time_buffer));
 
         if (S_ISDIR(file_info.st_mode))
@@ -285,7 +236,7 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
             }
             while (fgets(temp_line, sizeof(temp_line), temp_fp))
             {
-                printf("Renamed: %s", temp_line);
+                printf("Created: %s", temp_line);
             }
 
             fclose(snapshot_fp);
