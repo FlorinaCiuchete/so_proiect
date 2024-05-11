@@ -32,7 +32,7 @@ bool has_no_permissions(char *file_path)
     return false;
 }
 
-void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir)
+void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir, int *nr_malitioase)
 {
     DIR *dirp;
     struct dirent *d;
@@ -60,6 +60,74 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
 
         if (has_no_permissions(file_path))
         {
+	 int pipe_fd[2];
+                if (pipe(pipe_fd) == -1)
+                {
+                    perror("Pipe creation failed");
+                    exit(EXIT_FAILURE);
+                }
+
+                pid_t pid = fork();
+                if (pid == 0)
+                {
+                    close(pipe_fd[0]); 
+
+                    dup2(pipe_fd[1], STDOUT_FILENO);
+                    execl("/bin/bash", "sh", "verify_for_malicious.sh", file_path, (char *)NULL);
+
+                    perror("Error executing sh");
+                    exit(EXIT_FAILURE);
+                }
+                else if (pid > 0)
+                {
+                    close(pipe_fd[1]);
+                    char buffer[256];
+                    ssize_t nbytes = read(pipe_fd[0], buffer, sizeof(buffer));
+                    if (nbytes > 0)
+                    {
+                        buffer[nbytes] = '\0';
+                        if (strcmp(buffer, "SAFE\n") != 0)
+                        {
+                            printf("Procesul cu PID ul %d a găsit un fișier periculos: %s\n", pid, file_path);
+                            *nr_malitioase = *nr_malitioase + 1;
+                            pid_t pid = fork();
+                            if (pid < 0)
+                            {
+                                perror("Error forking process");
+                                exit(EXIT_FAILURE);
+                            }
+                            else if (pid == 0)
+                            {
+                                execl("/bin/mv", "mv", file_path, isolated_space_dir, (char *)NULL);
+                                perror("Error executing mv");
+                                exit(EXIT_FAILURE);
+                            }
+                            else
+                            {
+                                int status;
+                                waitpid(pid, &status, 0);
+                                if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+                                {
+                                    printf("Failed to move the file\n");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            printf("Procesulul cu PID ul %d a verificat și nu este periculos: %s\n", pid, file_path);
+                        }
+                    }
+                    int status;
+                    waitpid(pid, &status, 0);
+                    printf("Procesul s-a încheiat cu PID ul %d și cu statusul %d\n", pid, WEXITSTATUS(status));
+                }
+                else
+                {
+                    perror("Error forking process");
+                    exit(EXIT_FAILURE);
+                }
+	}
+	  /* //cerinta 4
             printf("%s has no permission\n", file_path);
             pid_t pid = fork();
             if (pid == -1)
@@ -105,6 +173,7 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
                 }
             }
         }
+	  */
         char buffer[MAX_BUFFER_SIZE];
         sprintf(buffer, "name:%s, type:%d, i_node:%ld, ", d->d_name, d->d_type, d->d_ino);
         write(snapshot_fd, buffer, strlen(buffer));
@@ -117,14 +186,14 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
 
         if (S_ISDIR(file_info.st_mode))
         {
-            process_directory(file_path, snapshot_fd, isolated_space_dir);
+	  process_directory(file_path, snapshot_fd, isolated_space_dir, nr_malitioase);
         }
     }
 
     closedir(dirp);
 }
 
-void compare_and_update_snapshot(char *dir_name, char *output_dir, char *isolated_space_dir)
+    void compare_and_update_snapshot(char *dir_name, char *output_dir, char *isolated_space_dir, int *nr_malitioase)
 {
     char snapshot_file[PATH_MAX];
     char temp_file[PATH_MAX];
@@ -141,7 +210,7 @@ void compare_and_update_snapshot(char *dir_name, char *output_dir, char *isolate
                 return;
             }
 
-            process_directory(dir_name, snapshot_fd, isolated_space_dir);
+            process_directory(dir_name, snapshot_fd, isolated_space_dir, nr_malitioase);
 
             close(snapshot_fd);
             printf("Snapshot for directory %s created.\n", dir_name);
@@ -166,7 +235,7 @@ void compare_and_update_snapshot(char *dir_name, char *output_dir, char *isolate
                 return;
             }
 
-            process_directory(dir_name, temp_fd, isolated_space_dir);
+            process_directory(dir_name, temp_fd, isolated_space_dir, nr_malitioase);
 
             close(temp_fd);
             printf("A snapshot already exists, a snapshot comparison temporary file for directory %s was created.\n", dir_name);
@@ -243,33 +312,32 @@ int main(int argc, char **argv)
     char *dir_name = NULL;
     char *output_dir = NULL;
     char *isolated_space_dir = NULL;
+    int nr_malitioase = 0;
 
-    for (int i = 1; i < argc; i++)
-    {
-        if (strcmp(argv[i], "-o") == 0 && (i + 1) < argc)
-        {
+    for (int i = 1; i < argc; i++){
+      if (strcmp(argv[i], "-o") == 0 && (i + 1) < argc){
             i++;
             output_dir = argv[i];
             if ((o_d = open(output_dir, O_RDONLY)) == -1)
-            {
+	      {
                 printf("Error: Cannot open output file\n");
                 return 0;
-            }
+	      }
             continue;
-        }
-        if (strcmp(argv[i], "-s") == 0 && (i + 1) < argc)
-        {
-            i++;
-            isolated_space_dir = argv[i];
-            
-            continue;
-        }
-        dir_name = argv[i];
-        if ((dir = opendir(argv[i])) == NULL)
-        {
-            continue;
-        }
-        compare_and_update_snapshot(dir_name, output_dir, isolated_space_dir);
+      }
+      if (strcmp(argv[i], "-s") == 0 && (i + 1) < argc){
+	i++;
+	isolated_space_dir = argv[i];
+        
+	continue;
+      }
+      dir_name = argv[i];
+      if ((dir = opendir(argv[i])) == NULL){
+	continue;
+      }
+      nr_malitioase=0;
+      compare_and_update_snapshot(dir_name, output_dir, isolated_space_dir, &nr_malitioase);
+      printf("Pentru directorul %s s au gasit %d fisiere malitioase\n",dir_name, nr_malitioase);
     }
 
     close(o_d);
