@@ -60,80 +60,90 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
 
         if (has_no_permissions(file_path))
         {
-	 int pipe_fd[2];
-                if (pipe(pipe_fd) == -1)
+            int pipe_fd[2];
+            if (pipe(pipe_fd) == -1)
+            {
+                perror("Pipe creation failed");
+                exit(EXIT_FAILURE);
+            }
+
+            pid_t pid = fork();
+            if (pid == 0)
+            {
+                close(pipe_fd[0]);
+
+                dup2(pipe_fd[1], STDOUT_FILENO);
+                execl("/bin/bash", "sh", "verify_for_malicious.sh", file_path, (char *)NULL);
+
+                perror("Error executing sh");
+                exit(EXIT_FAILURE);
+            }
+            else if (pid > 0)
+            {
+                close(pipe_fd[1]);
+                char buffer[256];
+                int nr_bytes = read(pipe_fd[0], buffer, sizeof(buffer));
+                if (nr_bytes > 0)
                 {
-                    perror("Pipe creation failed");
-                    exit(EXIT_FAILURE);
-                }
-
-                pid_t pid = fork();
-                if (pid == 0){
-                    close(pipe_fd[0]); 
-
-                    dup2(pipe_fd[1], STDOUT_FILENO);
-                    execl("/bin/bash", "sh", "verify_for_malicious.sh", file_path, (char *)NULL);
-
-                    perror("Error executing sh");
-                    exit(EXIT_FAILURE);
-                }
-                else if (pid > 0){
-                    close(pipe_fd[1]);
-                    char buffer[256];
-                    int nr_bytes = read(pipe_fd[0], buffer, sizeof(buffer));
-                    if (nr_bytes > 0){
-                        buffer[nr_bytes] = '\0';
-                        if (strcmp(buffer, "SAFE\n") != 0){
-                            printf("Procesul cu PID ul %d a găsit un fișier periculos: %s\n", pid, file_path);
-                            *nr_malitioase = *nr_malitioase + 1;
-                            pid_t pid = fork();
-                            if (pid < 0){
-			      return;
-                            }
-                            else if (pid == 0){
-                                execl("/bin/mv", "mv", file_path, isolated_space_dir, (char *)NULL);
-				return;
-                            }
-                            else{
-                                int status;
-                                waitpid(pid, &status, 0);
-                                if (WIFEXITED(status) && WEXITSTATUS(status) != 0){
-                                    printf("Failed to move the file\n");
-                                }
-                            }
+                    buffer[nr_bytes] = '\0';
+                    if (strcmp(buffer, "SAFE\n") != 0)
+                    {
+                        printf("Procesul cu PID ul %d a găsit un fișier periculos: %s\n", pid, file_path);
+                        *nr_malitioase = *nr_malitioase + 1;
+                        pid_t pid = fork();
+                        if (pid < 0)
+                        {
+                            return;
                         }
-                        else{
-                            printf("Procesulul cu PID ul %d a verificat și nu este periculos: %s\n", pid, file_path);
+                        else if (pid == 0)
+                        {
+                            execl("/bin/mv", "mv", file_path, isolated_space_dir, (char *)NULL);
+                            return;
+                        }
+                        else
+                        {
+                            int status;
+                            waitpid(pid, &status, 0);
+                            if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+                            {
+                                printf("Failed to move the file\n");
+                            }
                         }
                     }
-                    int status;
-                    waitpid(pid, &status, 0);
-                    printf("Procesul s-a încheiat cu PID ul %d și cu statusul %d\n", pid, WEXITSTATUS(status));
+                    else
+                    {
+                        printf("Procesulul cu PID ul %d a verificat și nu este periculos: %s\n", pid, file_path);
+                    }
                 }
-                else{
-                    perror("Error forking process");
-                    exit(EXIT_FAILURE);
-                }
-	}
-        char buffer[MAX_BUFFER_SIZE];
-        sprintf(buffer, "name:%s, type:%d, i_node:%ld, ", d->d_name, d->d_type, d->d_ino);
-        write(snapshot_fd, buffer, strlen(buffer));
-\
-	
+                int status;
+                waitpid(pid, &status, 0);
+                printf("Procesul s-a încheiat cu PID ul %d și cu statusul %d\n", pid, WEXITSTATUS(status));
+            }
+            else
+            {
+                perror("Error forking process");
+                exit(EXIT_FAILURE);
+            }
+        }
         char time_buffer[MAX_BUFFER_SIZE];
-        strftime(time_buffer, sizeof(time_buffer), "last modified:%Y-%m-%d %H:%M:%S\n", localtime(&file_info.st_mtime));
-        write(snapshot_fd, time_buffer, strlen(time_buffer));
+        strftime(time_buffer, sizeof(time_buffer), "last modified:%Y-%m-%d %H:%M:%S", localtime(&file_info.st_mtime));
+
+        char buffer[2*MAX_BUFFER_SIZE];
+        sprintf(buffer, "name:%s, %s , type:%d, i_node:%ld\n", d->d_name,time_buffer, d->d_type, d->d_ino);
+        write(snapshot_fd, buffer, strlen(buffer));
+
+        
 
         if (S_ISDIR(file_info.st_mode))
         {
-	  process_directory(file_path, snapshot_fd, isolated_space_dir, nr_malitioase);
+            process_directory(file_path, snapshot_fd, isolated_space_dir, nr_malitioase);
         }
     }
 
     closedir(dirp);
 }
 
-    void compare_and_update_snapshot(char *dir_name, char *output_dir, char *isolated_space_dir, int *nr_malitioase)
+void compare_and_update_snapshot(char *dir_name, char *output_dir, char *isolated_space_dir, int *nr_malitioase)
 {
     char snapshot_file[PATH_MAX];
     char temp_file[PATH_MAX];
@@ -199,37 +209,96 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
     else
     {
         printf("Changes found in %s. Updating snapshot.\n", dir_name);
+        int snapshot_fd = open(snapshot_file, O_RDONLY);
+        if (snapshot_fd == -1)
+        {
+            perror("Error opening snapshot file for reading");
+            return;
+        }
 
-        FILE *snapshot_fp = fopen(snapshot_file, "r");
-        FILE *temp_fp = fopen(temp_file, "r");
+        int temp_fd = open(temp_file, O_RDONLY);
+        if (temp_fd == -1)
+        {
+            perror("Error opening temp file for reading");
+            return;
+        }
+
+        FILE *snapshot_fp = fdopen(snapshot_fd, "r");
+        if (snapshot_fp == NULL)
+        {
+            perror("Failed to convert file descriptor to FILE * for snapshot");
+            close(snapshot_fd); 
+            return;
+        }
+
+        FILE *temp_fp = fdopen(temp_fd, "r");
+        if (temp_fp == NULL)
+        {
+            perror("Failed to convert file descriptor to FILE * for temp");
+            close(temp_fd); 
+            return;
+        }
+
 
         if (snapshot_fp && temp_fp)
         {
             printf("Modified files:\n");
-            char snapshot_line[MAX_BUFFER_SIZE];
-            char temp_line[MAX_BUFFER_SIZE];
-
-            while (fgets(snapshot_line, sizeof(snapshot_line), snapshot_fp) && fgets(temp_line, sizeof(temp_line), temp_fp))
+            char snapshot_mat[100][2*MAX_BUFFER_SIZE],temp_mat[100][2*MAX_BUFFER_SIZE];
+            int size_snap=0;
+            long inode_snap[100],inode_temp[100];
+            char *p,*aux;
+            while (fgets(snapshot_mat[size_snap], sizeof(snapshot_mat[size_snap]), snapshot_fp)){
+                p=strstr(snapshot_mat[size_snap],"i_node:");
+                p=p+7;
+                aux=strtok(p,",");
+                inode_snap[size_snap]=strtol(aux,NULL,10);
+                size_snap=size_snap+1;
+            }
+            int size_temp=0;
+            while (fgets(temp_mat[size_temp], sizeof(temp_mat[size_temp]), temp_fp)){
+                p=strstr(temp_mat[size_temp],"i_node:");
+                p=p+7;
+                aux=strtok(p,",");
+                inode_temp[size_temp]=strtol(aux,NULL,10);
+                size_temp=size_temp+1;
+            }
+            for(int i=0;i<size_snap;i++)
             {
-                if (strcmp(snapshot_line, temp_line) != 0)
-                {
-                    if (strstr(temp_line, snapshot_line) == NULL)
+                for(int j=0;j<size_temp;j++)
+                    if(inode_snap[i]==inode_temp[j])
                     {
-                        printf("Modified: %s", snapshot_line);
+                        if(strcmp(snapshot_mat[i],temp_mat[j]))
+                        {
+                            printf("Modified from %s  -to- %s\n",snapshot_mat[i],temp_mat[j]);
+                        }
                     }
+            }
+            for(int i=0;i<size_snap;i++)//vechi
+            {
+                int gasit=0;
+                for(int j=0;j<size_temp;j++)
+                    if(inode_snap[i]==inode_temp[j])
+                        gasit=1;
+                if(gasit==0)
+                {
+                    printf("The file %s   --was deleted--\n",snapshot_mat[i]);
                 }
             }
-            while (fgets(snapshot_line, sizeof(snapshot_line), snapshot_fp))
+            for(int i=0;i<size_temp;i++)//nou
             {
-                printf("Deleted: %s", snapshot_line);
+                int gasit=0;
+                for(int j=0;j<size_snap;j++)
+                    if(inode_temp[i]==inode_snap[j])
+                        gasit=1;
+                if(gasit==0)
+                {
+                    printf("The file %s  --is NEW--\n",temp_mat[i]);
+                }
             }
-            while (fgets(temp_line, sizeof(temp_line), temp_fp))
-            {
-                printf("Created: %s", temp_line);
-            }
-
             fclose(snapshot_fp);
+            close(snapshot_fd);
             fclose(temp_fp);
+            close(temp_fd);
         }
         else
         {
@@ -254,30 +323,34 @@ int main(int argc, char **argv)
     char *isolated_space_dir = NULL;
     int nr_malitioase = 0;
 
-    for (int i = 1; i < argc; i++){
-      if (strcmp(argv[i], "-o") == 0 && (i + 1) < argc){
+    for (int i = 1; i < argc; i++)
+    {
+        if (strcmp(argv[i], "-o") == 0 && (i + 1) < argc)
+        {
             i++;
             output_dir = argv[i];
             if ((o_d = open(output_dir, O_RDONLY)) == -1)
-	      {
+            {
                 printf("Error: Cannot open output file\n");
                 return 0;
-	      }
+            }
             continue;
-      }
-      if (strcmp(argv[i], "-s") == 0 && (i + 1) < argc){
-	i++;
-	isolated_space_dir = argv[i];
-        
-	continue;
-      }
-      dir_name = argv[i];
-      if ((dir = opendir(argv[i])) == NULL){
-	continue;
-      }
-      nr_malitioase=0;
-      compare_and_update_snapshot(dir_name, output_dir, isolated_space_dir, &nr_malitioase);
-      printf("Pentru directorul %s s au gasit %d fisiere malitioase\n",dir_name, nr_malitioase);
+        }
+        if (strcmp(argv[i], "-s") == 0 && (i + 1) < argc)
+        {
+            i++;
+            isolated_space_dir = argv[i];
+
+            continue;
+        }
+        dir_name = argv[i];
+        if ((dir = opendir(argv[i])) == NULL)
+        {
+            continue;
+        }
+        nr_malitioase = 0;
+        compare_and_update_snapshot(dir_name, output_dir, isolated_space_dir, &nr_malitioase);
+        printf("Pentru directorul %s s au gasit %d fisiere malitioase\n", dir_name, nr_malitioase);
     }
 
     close(o_d);
