@@ -68,8 +68,7 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
                 }
 
                 pid_t pid = fork();
-                if (pid == 0)
-                {
+                if (pid == 0){
                     close(pipe_fd[0]); 
 
                     dup2(pipe_fd[1], STDOUT_FILENO);
@@ -78,42 +77,32 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
                     perror("Error executing sh");
                     exit(EXIT_FAILURE);
                 }
-                else if (pid > 0)
-                {
+                else if (pid > 0){
                     close(pipe_fd[1]);
                     char buffer[256];
                     int nr_bytes = read(pipe_fd[0], buffer, sizeof(buffer));
-                    if (nr_bytes > 0)
-                    {
+                    if (nr_bytes > 0){
                         buffer[nr_bytes] = '\0';
-                        if (strcmp(buffer, "SAFE\n") != 0)
-                        {
+                        if (strcmp(buffer, "SAFE\n") != 0){
                             printf("Procesul cu PID ul %d a găsit un fișier periculos: %s\n", pid, file_path);
                             *nr_malitioase = *nr_malitioase + 1;
                             pid_t pid = fork();
-                            if (pid < 0)
-                            {
-                                perror("Error forking process");
-                                exit(EXIT_FAILURE);
+                            if (pid < 0){
+			      return;
                             }
-                            else if (pid == 0)
-                            {
+                            else if (pid == 0){
                                 execl("/bin/mv", "mv", file_path, isolated_space_dir, (char *)NULL);
-                                perror("Error executing mv");
-                                exit(EXIT_FAILURE);
+				return;
                             }
-                            else
-                            {
+                            else{
                                 int status;
                                 waitpid(pid, &status, 0);
-                                if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
-                                {
+                                if (WIFEXITED(status) && WEXITSTATUS(status) != 0){
                                     printf("Failed to move the file\n");
                                 }
                             }
                         }
-                        else
-                        {
+                        else{
                             printf("Procesulul cu PID ul %d a verificat și nu este periculos: %s\n", pid, file_path);
                         }
                     }
@@ -121,8 +110,7 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
                     waitpid(pid, &status, 0);
                     printf("Procesul s-a încheiat cu PID ul %d și cu statusul %d\n", pid, WEXITSTATUS(status));
                 }
-                else
-                {
+                else{
                     perror("Error forking process");
                     exit(EXIT_FAILURE);
                 }
@@ -130,7 +118,8 @@ void process_directory(char *dir_name, int snapshot_fd, char *isolated_space_dir
         char buffer[MAX_BUFFER_SIZE];
         sprintf(buffer, "name:%s, type:%d, i_node:%ld, ", d->d_name, d->d_type, d->d_ino);
         write(snapshot_fd, buffer, strlen(buffer));
-
+\
+	
         char time_buffer[MAX_BUFFER_SIZE];
         strftime(time_buffer, sizeof(time_buffer), "last modified:%Y-%m-%d %H:%M:%S\n", localtime(&file_info.st_mtime));
         write(snapshot_fd, time_buffer, strlen(time_buffer));
